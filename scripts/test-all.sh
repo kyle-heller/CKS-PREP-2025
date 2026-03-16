@@ -53,6 +53,25 @@ echo ""
 declare -a SETUP_RESULTS
 declare -a VERIFY_RESULTS
 
+# Questions whose LabSetUp modifies the API server manifest and causes a restart.
+# After these, we must wait for the API server to come back before continuing.
+API_SERVER_QUESTIONS="04 07"
+
+wait_for_apiserver() {
+  printf "  Waiting for API server... "
+  local i=0
+  while ! kubectl get nodes &>/dev/null 2>&1; do
+    sleep 2
+    ((i++))
+    if [ $i -gt 60 ]; then
+      echo -e "${RED}timeout (120s)${NC}"
+      return 1
+    fi
+  done
+  echo -e "${GREEN}ready${NC}"
+  sleep 3
+}
+
 for q in "${QUESTIONS[@]}"; do
   NUM=$(echo "$q" | grep -oE '^[0-9]+')
   PRETTY=$(echo "$q" | sed 's/^[0-9]*-//' | tr '-' ' ')
@@ -72,6 +91,10 @@ for q in "${QUESTIONS[@]}"; do
         echo "  $OUTPUT" | tail -3
         SETUP_RESULTS+=("Q${NUM}: SETUP_FAIL")
         ((SETUP_FAIL++))
+      fi
+      # Wait for API server after setups that modify its manifest
+      if echo "$API_SERVER_QUESTIONS" | grep -qw "$NUM"; then
+        wait_for_apiserver
       fi
     fi
   fi
