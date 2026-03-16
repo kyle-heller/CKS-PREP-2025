@@ -30,20 +30,22 @@ declare -a RESULTS
 
 wait_for_apiserver() {
   echo "  Waiting for API server to restart..."
-  # Give kubelet time to detect the manifest change and start the restart
-  sleep 8
-  # Wait for the API server to respond
+  # Give kubelet time to detect the manifest change
+  sleep 10
+  # Wait for kubectl to respond
   local i=0
   while ! kubectl get nodes &>/dev/null 2>&1; do
-    sleep 2
+    sleep 3
     ((i++))
-    if [ $i -gt 60 ]; then
+    if [ $i -gt 40 ]; then
       echo -e "  ${RED}API server did not recover after 120s${NC}"
       return 1
     fi
   done
-  # Let the pod fully stabilize before continuing
-  sleep 5
+  # Wait for the API server pod to be fully Running
+  kubectl wait --for=condition=Ready pod -l component=kube-apiserver \
+    -n kube-system --timeout=60s &>/dev/null 2>&1 || true
+  sleep 3
   echo "  API server is back."
 }
 
@@ -278,8 +280,13 @@ sed -i 's/AlwaysAdmit/NodeRestriction/' "$MANIFEST"
 
 wait_for_apiserver
 
-# Delete anonymous CRB (must be AFTER API server is back)
+# Delete anonymous CRB (must be AFTER API server is back, with retry)
 kubectl delete clusterrolebinding system:anonymous &>/dev/null || true
+sleep 2
+# Retry if still exists
+if kubectl get clusterrolebinding system:anonymous &>/dev/null 2>&1; then
+  kubectl delete clusterrolebinding system:anonymous &>/dev/null || true
+fi
 run_verify "04" "04-secure-api-server"
 echo ""
 
@@ -460,12 +467,13 @@ echo ""
 # Q12 — docker.sock Removal
 # =====================================================================
 echo -e "${CYAN}Q12: docker.sock Removal${NC}"
+# Replace volumes/volumeMounts with empty arrays (more reliable than remove)
 kubectl patch deploy docker-hacker -n dev-ops --type=json \
   -p='[
-    {"op":"remove","path":"/spec/template/spec/volumes"},
-    {"op":"remove","path":"/spec/template/spec/containers/0/volumeMounts"}
+    {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
+    {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]}
   ]' &>/dev/null || true
-sleep 3
+sleep 5
 run_verify "12" "12-docker-sock-removal"
 echo ""
 
@@ -528,6 +536,9 @@ echo ""
 # Q14 — Pod Security Admission
 # =====================================================================
 echo -e "${CYAN}Q14: Pod Security Admission${NC}"
+# Use nginx-unprivileged which runs as non-root on port 8080.
+# PSA restricted requires: runAsNonRoot, drop ALL caps, no privilege escalation,
+# seccomp RuntimeDefault. It does NOT require readOnlyRootFilesystem.
 cat > /home/masters/insecure-deployment.yaml << 'YAML'
 apiVersion: apps/v1
 kind: Deployment
@@ -551,37 +562,18 @@ spec:
           type: RuntimeDefault
       containers:
       - name: webapp
-        image: nginx:1.23
+        image: nginxinc/nginx-unprivileged:1.23
         ports:
-        - containerPort: 80
+        - containerPort: 8080
         securityContext:
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
-        volumeMounts:
-        - mountPath: /data
-          name: empty-vol
-        - mountPath: /var/cache/nginx
-          name: cache
-        - mountPath: /var/run
-          name: run
-        - mountPath: /tmp
-          name: tmp
-      volumes:
-      - name: empty-vol
-        emptyDir: {}
-      - name: cache
-        emptyDir: {}
-      - name: run
-        emptyDir: {}
-      - name: tmp
-        emptyDir: {}
 YAML
 kubectl delete deploy webapp -n secure-team --ignore-not-found &>/dev/null || true
 sleep 2
 kubectl apply -f /home/masters/insecure-deployment.yaml &>/dev/null
-kubectl rollout status deploy/webapp -n secure-team --timeout=90s &>/dev/null || true
+kubectl rollout status deploy/webapp -n secure-team --timeout=120s &>/dev/null || true
 run_verify "14" "14-pod-security-admission"
 echo ""
 
