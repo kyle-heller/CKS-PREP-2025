@@ -29,9 +29,12 @@ ERROR_COUNT=0
 declare -a RESULTS
 
 wait_for_apiserver() {
-  echo "  Waiting for API server to come back..."
+  echo "  Waiting for API server to restart..."
+  # Give kubelet time to detect the manifest change and start the restart
+  sleep 8
+  # Wait for the API server to respond
   local i=0
-  while ! kubectl get nodes &>/dev/null; do
+  while ! kubectl get nodes &>/dev/null 2>&1; do
     sleep 2
     ((i++))
     if [ $i -gt 60 ]; then
@@ -39,8 +42,9 @@ wait_for_apiserver() {
       return 1
     fi
   done
+  # Let the pod fully stabilize before continuing
+  sleep 5
   echo "  API server is back."
-  sleep 3
 }
 
 # Add a volumeMount + volume to the kube-apiserver static pod manifest
