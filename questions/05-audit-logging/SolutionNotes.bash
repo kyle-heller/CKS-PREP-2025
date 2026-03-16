@@ -40,3 +40,15 @@
 #
 # Step 3: Wait for API server restart, then verify:
 #   tail -f /var/log/kubernetes-logs.log
+#
+# Test the CronJob rule:
+#   kubectl create cronjob testjob --image=busybox --schedule="*/1 * * * *" -- /bin/sh -c 'date'
+#   cat /var/log/kubernetes-logs.log | grep cronjob
+#
+# Notes:
+# - Audit levels: None < Metadata < Request < RequestResponse
+# - Rules are evaluated in order — first match wins
+# - The kube-proxy exclusion rule must come BEFORE the catch-all core/extensions rule
+# - Volume mounts are needed for BOTH the policy file AND the log directory
+# - If the API server fails to start, check: missing volumes, bad YAML indentation,
+#   or typos in the policy file path

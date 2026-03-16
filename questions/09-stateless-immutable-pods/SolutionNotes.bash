@@ -10,3 +10,12 @@
 #   kubectl delete --grace-period=0 --force pod gcc -n prod
 #
 # frontend should remain (compliant)
+#
+# Notes:
+# - Stateless: Pods should not persist data in hostPath or PVC volumes.
+#   emptyDir is considered stateless (ephemeral, dies with the pod).
+# - Immutable: Pods should not run as privileged and must have
+#   readOnlyRootFilesystem: true.
+# - app is non-compliant: privileged=true AND readOnlyRootFilesystem=false
+# - gcc is non-compliant: uses hostPath volume (stateful)
+# - frontend is compliant: readOnlyRootFilesystem=true, privileged=false, no hostPath

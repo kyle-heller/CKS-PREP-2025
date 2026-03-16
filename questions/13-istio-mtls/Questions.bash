@@ -1,8 +1,12 @@
 # CKS Practice — Istio mTLS
 # Domain: Minimize Microservice Vulnerabilities (20%)
 #
-# Enable Istio Mutual TLS (mTLS) in STRICT mode for all workloads
-# in the namespace payments.
+# Istio is pre-installed on this cluster. The payments namespace
+# needs mTLS enforcement.
 #
-# Before enforcing mTLS, verify that automatic Istio Sidecar Injection
-# is enabled for the namespace.
+# 1. Label the payments namespace for automatic Istio sidecar injection.
+# 2. Create a PeerAuthentication resource named payments-mtls-strict
+#    in the payments namespace that enforces STRICT mTLS for all workloads.
+#
+# Note: On the real exam, Istio would be fully installed. Here we validate
+# the correctness of your namespace label and PeerAuthentication manifest.

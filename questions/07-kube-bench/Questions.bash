@@ -1,17 +1,19 @@
 # CKS Practice — kube-bench Fixes
 # Domain: Cluster Setup (15%)
 #
-# Fix multiple security violations identified by kube-bench.
+# Run kube-bench against the cluster and fix all security violations found.
 #
-# API Server:
-#   - Enable RotateKubeletServerCertificate.
-#   - Enable admission plugin PodSecurityPolicy.
-#   - Set --kubelet-certificate-authority argument.
+# API Server (/etc/kubernetes/manifests/kube-apiserver.yaml):
+#   - Ensure --kubelet-certificate-authority is set to /etc/kubernetes/pki/ca.crt
+#   - Ensure --profiling is disabled (set to false or remove the flag)
 #
-# Kubelet:
-#   - Disable anonymous authentication.
-#   - Set authorization-mode to Webhook.
+# Kubelet (/var/lib/kubelet/config.yaml):
+#   - Disable anonymous authentication
+#   - Set authorization mode to Webhook
+#   - Restart kubelet after changes
 #
-# ETCD:
-#   - Ensure --auto-tls is not true.
-#   - Ensure --peer-auto-tls is not true.
+# ETCD (/etc/kubernetes/manifests/etcd.yaml):
+#   - Ensure --auto-tls is not set to true
+#   - Ensure --peer-auto-tls is not set to true
+#
+# After fixing, verify the cluster is healthy with: kubectl get nodes
