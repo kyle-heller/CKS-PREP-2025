@@ -1,0 +1,345 @@
+#!/bin/bash
+# CKS Prep 2025 — Interactive CLI
+# Usage: ./cks-prep [question-number]
+
+set -uo pipefail
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+QUESTIONS_DIR="$REPO_DIR/questions"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+clear_screen() { printf '\033[2J\033[H'; }
+
+banner() {
+  echo -e "${CYAN}${BOLD}"
+  echo "  ╔═══════════════════════════════════════╗"
+  echo "  ║         CKS Prep 2025 — Labs          ║"
+  echo "  ╚═══════════════════════════════════════╝"
+  echo -e "${NC}"
+}
+
+# Get sorted list of question dirs
+get_questions() {
+  ls -1 "$QUESTIONS_DIR" | sort
+}
+
+get_question_count() {
+  get_questions | wc -l | tr -d ' '
+}
+
+# Extract a human-readable name from dir name (e.g., 01-apparmor-profile → AppArmor Profile)
+pretty_name() {
+  echo "$1" | sed 's/^[0-9]*-//' | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1'
+}
+
+question_number() {
+  echo "$1" | grep -oE '^[0-9]+'
+}
+
+# ─── Question List ───────────────────────────────────────────────────
+show_list() {
+  clear_screen
+  banner
+  echo -e "  ${BOLD}Available Questions${NC} ($(get_question_count) total)"
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+  echo ""
+
+  local i=0
+  local questions=($(get_questions))
+  local page_size=15
+  local total=${#questions[@]}
+  local page=0
+  local max_page=$(( (total - 1) / page_size ))
+
+  while true; do
+    local start=$(( page * page_size ))
+    local end=$(( start + page_size ))
+    [ $end -gt $total ] && end=$total
+
+    # Clear and redraw
+    clear_screen
+    banner
+    echo -e "  ${BOLD}Questions${NC} (page $((page+1)) of $((max_page+1)))"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+
+    for (( i=start; i<end; i++ )); do
+      local q="${questions[$i]}"
+      local num=$(question_number "$q")
+      local name=$(pretty_name "$q")
+      printf "  ${YELLOW}%3s${NC}  %s\n" "$num" "$name"
+    done
+
+    echo ""
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    local nav=""
+    [ $page -gt 0 ] && nav="${nav}[p]rev  "
+    [ $page -lt $max_page ] && nav="${nav}[n]ext  "
+    echo -e "  ${nav}[${BOLD}#${NC}] Select question  [${BOLD}q${NC}] Quit"
+    echo ""
+    read -rp "  > " choice
+
+    case "$choice" in
+      n|N|next) [ $page -lt $max_page ] && page=$((page+1)) ;;
+      p|P|prev) [ $page -gt 0 ] && page=$((page-1)) ;;
+      q|Q|quit|exit) echo ""; exit 0 ;;
+      [0-9]*)
+        local match=""
+        for q in "${questions[@]}"; do
+          if [ "$(question_number "$q")" = "$choice" ] || [ "$(question_number "$q")" = "$(printf '%02d' "$choice" 2>/dev/null)" ]; then
+            match="$q"
+            break
+          fi
+        done
+        if [ -n "$match" ]; then
+          run_question "$match"
+        else
+          echo -e "  ${RED}Question $choice not found.${NC}"
+          sleep 1
+        fi
+        ;;
+    esac
+  done
+}
+
+# ─── Run a Question ─────────────────────────────────────────────────
+run_question() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+  local num=$(question_number "$q")
+  local name=$(pretty_name "$q")
+
+  # Run lab setup
+  if [ -f "$qdir/LabSetUp.bash" ]; then
+    clear_screen
+    echo -e "${CYAN}${BOLD}  Setting up lab environment...${NC}"
+    echo -e "  ${DIM}$name${NC}"
+    echo ""
+    bash "$qdir/LabSetUp.bash" 2>&1 | sed 's/^/  /'
+    echo ""
+    echo -e "  ${GREEN}Lab ready.${NC}"
+    sleep 1
+  fi
+
+  # Show question
+  show_question_screen "$q"
+}
+
+show_question_screen() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+  local num=$(question_number "$q")
+  local name=$(pretty_name "$q")
+
+  clear_screen
+  echo -e "${CYAN}${BOLD}  ┌─ Question $num ─────────────────────────────────┐${NC}"
+  echo -e "${CYAN}${BOLD}  │  $name"
+  echo -e "${CYAN}${BOLD}  └────────────────────────────────────────────────┘${NC}"
+  echo ""
+
+  if [ -f "$qdir/Questions.bash" ]; then
+    # Strip comment markers and display cleanly
+    sed 's/^# //' "$qdir/Questions.bash" | sed 's/^#$//' | sed '/^!/d' | sed 's/^/  /'
+  fi
+
+  echo ""
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+  echo ""
+  question_menu "$q"
+}
+
+question_menu() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+
+  while true; do
+    echo -e "  [${GREEN}${BOLD}v${NC}] Validate my answer"
+    echo -e "  [${YELLOW}${BOLD}h${NC}] Show hints / walkthrough"
+    echo -e "  [${BLUE}${BOLD}s${NC}] Show full solution"
+    echo -e "  [${BOLD}r${NC}] Re-read the question"
+    echo -e "  [${BOLD}l${NC}] Back to question list"
+    echo -e "  [${BOLD}q${NC}] Quit"
+    echo ""
+    read -rp "  > " choice
+
+    case "$choice" in
+      v|V|validate)
+        echo ""
+        run_validation "$q"
+        echo ""
+        ;;
+      h|H|hint|hints)
+        echo ""
+        show_walkthrough "$q"
+        echo ""
+        ;;
+      s|S|solution)
+        echo ""
+        show_solution "$q"
+        echo ""
+        ;;
+      r|R)
+        show_question_screen "$q"
+        return
+        ;;
+      l|L|list|back)
+        show_list
+        return
+        ;;
+      q|Q|quit|exit)
+        echo ""
+        exit 0
+        ;;
+      *)
+        echo -e "  ${DIM}(type v, h, s, r, l, or q)${NC}"
+        echo ""
+        ;;
+    esac
+  done
+}
+
+# ─── Validation ──────────────────────────────────────────────────────
+run_validation() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+
+  if [ ! -f "$qdir/Verify.bash" ]; then
+    echo -e "  ${YELLOW}No verification script for this question.${NC}"
+    return
+  fi
+
+  echo -e "  ${CYAN}${BOLD}Validating...${NC}"
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+  echo ""
+
+  local output
+  output=$(bash "$qdir/Verify.bash" 2>&1)
+  local rc=$?
+
+  echo "$output" | sed 's/^/  /'
+  echo ""
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+
+  if [ $rc -eq 0 ]; then
+    echo -e "  ${GREEN}${BOLD}✓ PASSED${NC}"
+  else
+    echo -e "  ${RED}${BOLD}✗ FAILED${NC} — keep trying, or press ${YELLOW}h${NC} for hints"
+  fi
+}
+
+# ─── Walkthrough (hints, step by step) ───────────────────────────────
+show_walkthrough() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+
+  if [ ! -f "$qdir/SolutionNotes.bash" ]; then
+    echo -e "  ${YELLOW}No walkthrough available for this question.${NC}"
+    return
+  fi
+
+  # Extract steps from solution notes — show them one at a time
+  echo -e "  ${YELLOW}${BOLD}Walkthrough${NC}"
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+  echo -e "  ${DIM}Press Enter for each next step, or 'a' to show all, 'q' to stop${NC}"
+  echo ""
+
+  local step=0
+  local in_block=false
+  local block=""
+
+  # Parse solution into steps (split on blank comment lines)
+  while IFS= read -r line; do
+    # Strip leading "# " comment marker
+    local clean="${line#\# }"
+    clean="${clean#\#}"
+
+    # Skip shebang and empty first lines
+    [[ "$clean" =~ ^! ]] && continue
+
+    if [ -z "$clean" ] && [ -n "$block" ]; then
+      # End of a step block — display it
+      step=$((step + 1))
+      echo -e "  ${YELLOW}Step $step:${NC}"
+      echo "$block" | sed 's/^/    /'
+      echo ""
+      block=""
+
+      read -rsn1 key
+      case "$key" in
+        a|A)
+          # Show the rest all at once
+          sed 's/^# //' "$qdir/SolutionNotes.bash" | sed 's/^#$//' | sed '/^!/d' | tail -n +$((step * 5)) | sed 's/^/    /'
+          echo ""
+          return
+          ;;
+        q|Q) return ;;
+      esac
+    else
+      [ -n "$block" ] && block="$block"$'\n'"$clean" || block="$clean"
+    fi
+  done < "$qdir/SolutionNotes.bash"
+
+  # Show any remaining block
+  if [ -n "$block" ]; then
+    step=$((step + 1))
+    echo -e "  ${YELLOW}Step $step:${NC}"
+    echo "$block" | sed 's/^/    /'
+    echo ""
+  fi
+
+  echo -e "  ${DIM}(end of walkthrough)${NC}"
+}
+
+# ─── Full Solution ───────────────────────────────────────────────────
+show_solution() {
+  local q="$1"
+  local qdir="$QUESTIONS_DIR/$q"
+
+  if [ ! -f "$qdir/SolutionNotes.bash" ]; then
+    echo -e "  ${YELLOW}No solution available for this question.${NC}"
+    return
+  fi
+
+  echo -e "  ${BLUE}${BOLD}Full Solution${NC}"
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+  echo ""
+  sed 's/^# //' "$qdir/SolutionNotes.bash" | sed 's/^#$//' | sed '/^!/d' | sed 's/^/  /'
+  echo ""
+  echo -e "  ${DIM}────────────────────────────────────────${NC}"
+}
+
+# ─── Main ────────────────────────────────────────────────────────────
+
+# Direct question number as argument
+if [ $# -ge 1 ]; then
+  target="$1"
+  match=""
+  for q in $(get_questions); do
+    num=$(question_number "$q")
+    if [ "$num" = "$target" ] || [ "$num" = "$(printf '%02d' "$target" 2>/dev/null)" ]; then
+      match="$q"
+      break
+    fi
+  done
+
+  if [ -n "$match" ]; then
+    run_question "$match"
+  else
+    echo -e "${RED}Question $target not found.${NC}"
+    echo ""
+    echo "Usage: $0 [question-number]"
+    echo "       $0           # interactive menu"
+    exit 1
+  fi
+else
+  show_list
+fi
