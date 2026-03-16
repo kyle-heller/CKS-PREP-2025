@@ -271,10 +271,11 @@ if ! grep -q '\-\-anonymous-auth' "$MANIFEST"; then
 fi
 # Fix admission plugins: AlwaysAdmit -> NodeRestriction
 sed -i 's/AlwaysAdmit/NodeRestriction/' "$MANIFEST"
-# Delete anonymous CRB
-kubectl delete clusterrolebinding system:anonymous &>/dev/null || true
 
 wait_for_apiserver
+
+# Delete anonymous CRB (must be AFTER API server is back)
+kubectl delete clusterrolebinding system:anonymous &>/dev/null || true
 run_verify "04" "04-secure-api-server"
 echo ""
 
