@@ -2,7 +2,7 @@
 # Solution: AppArmor Profile Enforcement
 #
 # Step 1: SSH to the worker node and load the profile
-# ssh node01
+# ssh <worker-node>    (e.g., node01)
 # apparmor_parser -q /etc/apparmor.d/nginx_apparmor
 # aa-status | grep nginx-profile-2
 # exit
@@ -26,5 +26,5 @@
 # Step 3: Apply and verify
 # kubectl apply -f /home/candidate/nginx-pod.yaml
 # kubectl get pods nginx-pod
-# kubectl exec nginx-pod -- touch /tmp/test
-#   → should fail with "Permission denied" (write denied by AppArmor)
+# kubectl exec nginx-pod -- touch /etc/test
+#   → should fail with "Permission denied" (write to /etc/ denied by AppArmor)

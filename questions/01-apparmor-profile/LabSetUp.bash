@@ -15,8 +15,15 @@ ssh "$WORKER" 'mkdir -p /etc/apparmor.d && cat > /etc/apparmor.d/nginx_apparmor 
 profile nginx-profile-2 flags=(attach_disconnected) {
     #include <abstractions/base>
     file,
-    # Deny all file writes.
-    deny /** w,
+    # Allow nginx to run
+    /var/run/nginx.pid w,
+    /var/cache/nginx/** w,
+    /run/nginx.pid w,
+    /tmp/** w,
+    # Deny writes to sensitive paths
+    deny /etc/** w,
+    deny /root/** w,
+    deny /home/** w,
 }
 PROFILE'
 

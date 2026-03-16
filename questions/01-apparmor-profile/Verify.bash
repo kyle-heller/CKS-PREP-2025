@@ -51,11 +51,11 @@ else
   fi
 fi
 
-# Check 5: Write is actually denied
-if kubectl exec nginx-pod -- touch /tmp/apparmor-test 2>&1 | grep -qi "denied\|permission\|read-only\|cannot"; then
-  echo "✓ File write denied by AppArmor (working correctly)"
+# Check 5: Write to /etc/ is denied by AppArmor
+if kubectl exec nginx-pod -- touch /etc/apparmor-test 2>&1 | grep -qi "denied\|permission\|read-only\|cannot"; then
+  echo "✓ Write to /etc/ denied by AppArmor (working correctly)"
 else
-  echo "✗ File write was NOT denied — AppArmor may not be enforcing"
+  echo "✗ Write to /etc/ was NOT denied — AppArmor may not be enforcing"
   PASS=false
 fi
 
