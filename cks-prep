@@ -1,6 +1,7 @@
 #!/bin/bash
 # CKS Prep 2025 — Interactive CLI
 # Usage: ./cks-prep [question-number]
+#        ./cks-prep --test [1|2|3]   # practice exam mode
 
 set -uo pipefail
 
@@ -192,7 +193,11 @@ question_menu() {
         return
         ;;
       l|L|list|back)
-        show_list
+        if [ $TEST_MODE -gt 0 ]; then
+          show_test_list
+        else
+          show_list
+        fi
         return
         ;;
       q|Q|quit|exit)
@@ -317,29 +322,174 @@ show_solution() {
   echo -e "  ${DIM}────────────────────────────────────────${NC}"
 }
 
-# ─── Main ────────────────────────────────────────────────────────────
+# ─── Test Mode (3 practice exams) ─────────────────────────────────────
+# Test 1: Q01-Q18, Test 2: Q19-Q36, Test 3: Q37-Q54
+TEST_MODE=0
+TEST_START=0
+TEST_END=0
 
-# Direct question number as argument
-if [ $# -ge 1 ]; then
-  target="$1"
-  match=""
-  for q in $(get_questions); do
+setup_test_mode() {
+  TEST_MODE=$1
+  case "$TEST_MODE" in
+    1) TEST_START=1;  TEST_END=18 ;;
+    2) TEST_START=19; TEST_END=36 ;;
+    3) TEST_START=37; TEST_END=54 ;;
+    *) echo -e "${RED}Invalid test number. Use 1, 2, or 3.${NC}"; exit 1 ;;
+  esac
+}
+
+get_test_questions() {
+  get_questions | while read -r q; do
+    local num
     num=$(question_number "$q")
-    if [ "$num" = "$target" ] || [ "$num" = "$(printf '%02d' "$target" 2>/dev/null)" ]; then
-      match="$q"
-      break
+    num=$((10#$num))
+    if [ "$num" -ge "$TEST_START" ] && [ "$num" -le "$TEST_END" ]; then
+      echo "$q"
+    fi
+  done
+}
+
+run_test_setup() {
+  local test_qs=($(get_test_questions))
+  local total=${#test_qs[@]}
+
+  clear_screen
+  echo -e "${CYAN}${BOLD}"
+  echo "  ╔═══════════════════════════════════════╗"
+  printf "  ║   CKS Practice Exam %d of 3            ║\n" "$TEST_MODE"
+  printf "  ║   Questions %02d - %02d  (%d questions)    ║\n" "$TEST_START" "$TEST_END" "$total"
+  echo "  ╚═══════════════════════════════════════╝"
+  echo -e "${NC}"
+  echo -e "  ${YELLOW}Setting up lab environments...${NC}"
+  echo ""
+
+  local count=0
+  for q in "${test_qs[@]}"; do
+    local qdir="$QUESTIONS_DIR/$q"
+    local num=$(question_number "$q")
+    local name=$(pretty_name "$q")
+    count=$((count + 1))
+
+    if [ -f "$qdir/LabSetUp.bash" ]; then
+      printf "  ${DIM}[%2d/%d] Q%s: %s...${NC}" "$count" "$total" "$num" "$name"
+      if bash "$qdir/LabSetUp.bash" &>/dev/null; then
+        printf "\r  ${GREEN}✓${NC} [%2d/%d] Q%s: %s\n" "$count" "$total" "$num" "$name"
+      else
+        printf "\r  ${YELLOW}⚠${NC} [%2d/%d] Q%s: %s (warning)\n" "$count" "$total" "$num" "$name"
+      fi
+    else
+      printf "  ${DIM}  [%2d/%d] Q%s: %s (no lab setup)${NC}\n" "$count" "$total" "$num" "$name"
     fi
   done
 
-  if [ -n "$match" ]; then
-    run_question "$match"
-  else
-    echo -e "${RED}Question $target not found.${NC}"
+  echo ""
+  echo -e "  ${GREEN}${BOLD}All labs ready.${NC}"
+  echo ""
+  read -rp "  Press Enter to begin exam... "
+}
+
+show_test_list() {
+  local test_qs=($(get_test_questions))
+  local total=${#test_qs[@]}
+
+  while true; do
+    clear_screen
+    echo -e "${CYAN}${BOLD}"
+    echo "  ╔═══════════════════════════════════════╗"
+    printf "  ║   CKS Practice Exam %d of 3            ║\n" "$TEST_MODE"
+    echo "  ╚═══════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo -e "  ${BOLD}Questions${NC} ($total total)"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
     echo ""
-    echo "Usage: $0 [question-number]"
-    echo "       $0           # interactive menu"
-    exit 1
-  fi
+
+    for (( i=0; i<total; i++ )); do
+      local q="${test_qs[$i]}"
+      local num=$(question_number "$q")
+      local name=$(pretty_name "$q")
+      printf "  ${YELLOW}%3s${NC}  %s\n" "$num" "$name"
+    done
+
+    echo ""
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo -e "  [${BOLD}#${NC}] Select question  [${BOLD}q${NC}] Quit"
+    echo ""
+    read -rp "  > " choice
+
+    case "$choice" in
+      q|Q|quit|exit) echo ""; exit 0 ;;
+      [0-9]*)
+        local match=""
+        for q in "${test_qs[@]}"; do
+          if [ "$(question_number "$q")" = "$choice" ] || [ "$(question_number "$q")" = "$(printf '%02d' "$choice" 2>/dev/null)" ]; then
+            match="$q"
+            break
+          fi
+        done
+        if [ -n "$match" ]; then
+          run_question "$match"
+        else
+          echo -e "  ${RED}Question $choice not in this test.${NC}"
+          sleep 1
+        fi
+        ;;
+    esac
+  done
+}
+
+# ─── Main ────────────────────────────────────────────────────────────
+
+if [ $# -ge 1 ]; then
+  case "$1" in
+    --test)
+      if [ $# -lt 2 ]; then
+        echo "Usage: $0 --test [1|2|3]"
+        echo "  Test 1: Q01-Q18"
+        echo "  Test 2: Q19-Q36"
+        echo "  Test 3: Q37-Q54"
+        exit 1
+      fi
+      setup_test_mode "$2"
+      run_test_setup
+      show_test_list
+      ;;
+    -h|--help)
+      echo "CKS Prep 2025 — Interactive CLI"
+      echo ""
+      echo "Usage:"
+      echo "  $0                    # browse all 55 questions"
+      echo "  $0 <number>           # jump to question #"
+      echo "  $0 --test [1|2|3]    # practice exam mode"
+      echo ""
+      echo "Practice Exams:"
+      echo "  Test 1: Q01-Q18  (18 questions)"
+      echo "  Test 2: Q19-Q36  (18 questions)"
+      echo "  Test 3: Q37-Q54  (18 questions)"
+      exit 0
+      ;;
+    *)
+      target="$1"
+      match=""
+      for q in $(get_questions); do
+        num=$(question_number "$q")
+        if [ "$num" = "$target" ] || [ "$num" = "$(printf '%02d' "$target" 2>/dev/null)" ]; then
+          match="$q"
+          break
+        fi
+      done
+
+      if [ -n "$match" ]; then
+        run_question "$match"
+      else
+        echo -e "${RED}Question $target not found.${NC}"
+        echo ""
+        echo "Usage: $0 [question-number]"
+        echo "       $0 --test [1|2|3]"
+        echo "       $0           # interactive menu"
+        exit 1
+      fi
+      ;;
+  esac
 else
   show_list
 fi
