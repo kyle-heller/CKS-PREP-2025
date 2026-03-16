@@ -1,9 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Create AppArmor profile on the node
-mkdir -p /etc/apparmor.d
-cat > /etc/apparmor.d/nginx_apparmor << 'PROFILE'
+# Detect worker node name
+WORKER=$(kubectl get nodes --no-headers | grep -v control-plane | awk '{print $1}' | head -1)
+if [ -z "$WORKER" ]; then
+  echo "ERROR: No worker node found."
+  exit 1
+fi
+echo "Worker node: $WORKER"
+
+# Create AppArmor profile on the WORKER node (not controlplane)
+ssh "$WORKER" 'mkdir -p /etc/apparmor.d && cat > /etc/apparmor.d/nginx_apparmor << '"'"'PROFILE'"'"'
 #include <tunables/global>
 profile nginx-profile-2 flags=(attach_disconnected) {
     #include <abstractions/base>
@@ -11,17 +18,17 @@ profile nginx-profile-2 flags=(attach_disconnected) {
     # Deny all file writes.
     deny /** w,
 }
-PROFILE
+PROFILE'
 
 # Create Pod manifest template (without AppArmor config — student must add it)
 mkdir -p /home/candidate
-cat > /home/candidate/nginx-pod.yaml << 'YAML'
+cat > /home/candidate/nginx-pod.yaml << YAML
 apiVersion: v1
 kind: Pod
 metadata:
   name: nginx-pod
 spec:
-  nodeName: node-01
+  nodeName: $WORKER
   containers:
   - name: nginx-pod
     image: nginx:1.19.0
@@ -29,5 +36,7 @@ spec:
     - containerPort: 80
 YAML
 
-echo "Lab setup complete. AppArmor profile at /etc/apparmor.d/nginx_apparmor"
-echo "Pod manifest at /home/candidate/nginx-pod.yaml"
+echo ""
+echo "Lab setup complete."
+echo "  AppArmor profile on $WORKER: /etc/apparmor.d/nginx_apparmor"
+echo "  Pod manifest: /home/candidate/nginx-pod.yaml"
