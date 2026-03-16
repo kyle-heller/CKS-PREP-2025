@@ -1,14 +1,15 @@
 #!/bin/bash
 # CKS-PREP-2025 Test Runner
-# Run LabSetUp and/or Verify scripts for Test 1 or Test 2 questions
+# Run LabSetUp and/or Verify scripts for Test 1, Test 2, or Test 3+4 questions
 # and report a summary.
 #
 # Usage:
 #   bash scripts/test-all.sh              # Run setup + verify for all Q01-Q16
 #   bash scripts/test-all.sh --test2      # Run setup + verify for all Q17-Q32
+#   bash scripts/test-all.sh --test3      # Run setup + verify for all Q33-Q55
 #   bash scripts/test-all.sh --setup-only # Only run LabSetUp scripts
 #   bash scripts/test-all.sh --verify-only # Only run Verify scripts
-#   bash scripts/test-all.sh --test2 --verify-only  # Combine flags
+#   bash scripts/test-all.sh --test3 --verify-only  # Combine flags
 
 set -uo pipefail
 
@@ -19,16 +20,22 @@ QUESTIONS_DIR="$REPO_DIR/questions"
 SETUP=true
 VERIFY=true
 TEST2=false
+TEST3=false
 for arg in "$@"; do
   case "$arg" in
     --setup-only)  VERIFY=false ;;
     --verify-only) SETUP=false ;;
     --test2)       TEST2=true ;;
+    --test3)       TEST3=true ;;
   esac
 done
 
 # Select question range based on test
-if $TEST2; then
+if $TEST3; then
+  Q_MIN=33; Q_MAX=55
+  LABEL="Q33-Q55 (Test 3+4)"
+  API_SERVER_QUESTIONS="39"
+elif $TEST2; then
   Q_MIN=17; Q_MAX=32
   LABEL="Q17-Q32 (Test 2)"
   API_SERVER_QUESTIONS="26"
