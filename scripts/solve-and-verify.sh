@@ -15,6 +15,7 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 Q="$REPO_DIR/questions"
+MANIFEST="/etc/kubernetes/manifests/kube-apiserver.yaml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,6 +41,28 @@ wait_for_apiserver() {
   done
   echo "  API server is back."
   sleep 3
+}
+
+# Add a volumeMount + volume to the kube-apiserver static pod manifest
+# using sed (NOT yaml.dump, which corrupts the file).
+# Args: mount_path vol_name read_only host_path host_type
+add_apiserver_volume() {
+  local mount_path="$1"
+  local vol_name="$2"
+  local read_only="$3"
+  local host_path="$4"
+  local host_type="$5"
+
+  # Skip if already present
+  if grep -q "name: ${vol_name}" "$MANIFEST"; then
+    return 0
+  fi
+
+  # Insert volumeMount after the "    volumeMounts:" line
+  sed -i "/    volumeMounts:/a\\    - mountPath: ${mount_path}\n      name: ${vol_name}\n      readOnly: ${read_only}" "$MANIFEST"
+
+  # Insert volume after the "  volumes:" line
+  sed -i "/^  volumes:/a\\  - hostPath:\n      path: ${host_path}\n      type: ${host_type}\n    name: ${vol_name}" "$MANIFEST"
 }
 
 run_verify() {
@@ -147,7 +170,7 @@ echo ""
 echo -e "${CYAN}Q01: AppArmor Profile${NC}"
 WORKER=$(kubectl get nodes --no-headers | grep -v control-plane | awk '{print $1}' | head -1)
 echo "  Loading AppArmor profile on $WORKER..."
-ssh "$WORKER" 'apparmor_parser -q /etc/apparmor.d/nginx_apparmor' 2>/dev/null
+ssh "$WORKER" 'apparmor_parser -r -q /etc/apparmor.d/nginx_apparmor' 2>/dev/null
 
 echo "  Creating pod with AppArmor profile..."
 cat > /tmp/q01-pod.yaml << YAML
@@ -168,7 +191,7 @@ spec:
         localhostProfile: nginx-profile-2
 YAML
 kubectl delete pod nginx-pod --ignore-not-found --grace-period=0 --force &>/dev/null || true
-sleep 1
+sleep 2
 kubectl apply -f /tmp/q01-pod.yaml &>/dev/null
 kubectl wait --for=condition=Ready pod/nginx-pod --timeout=60s &>/dev/null || true
 run_verify "01" "01-apparmor-profile"
@@ -239,7 +262,6 @@ echo ""
 # Q04 — Re-secure API Server
 # =====================================================================
 echo -e "${CYAN}Q04: Re-secure API Server${NC}"
-MANIFEST="/etc/kubernetes/manifests/kube-apiserver.yaml"
 
 # Fix authorization mode
 sed -i 's/--authorization-mode=AlwaysAllow/--authorization-mode=Node,RBAC/' "$MANIFEST"
@@ -292,31 +314,9 @@ if ! grep -q 'audit-log-path' "$MANIFEST"; then
   sed -i '/--anonymous-auth/a\    - --audit-policy-file=/etc/audit/audit-policy.yaml\n    - --audit-log-path=/var/log/kubernetes-logs.log\n    - --audit-log-maxage=5\n    - --audit-log-maxbackup=10\n    - --audit-log-maxsize=100' "$MANIFEST"
 fi
 
-# Add volume mounts for audit (check if not already there)
-if ! grep -q 'name: audit$' "$MANIFEST"; then
-  # Add volumeMount entries
-  python3 -c "
-import yaml, sys
-with open('$MANIFEST') as f:
-    doc = yaml.safe_load(f)
-
-containers = doc['spec']['containers']
-for c in containers:
-    if c['name'] == 'kube-apiserver':
-        if 'volumeMounts' not in c:
-            c['volumeMounts'] = []
-        c['volumeMounts'].append({'mountPath': '/etc/audit/audit-policy.yaml', 'name': 'audit', 'readOnly': True})
-        c['volumeMounts'].append({'mountPath': '/var/log', 'name': 'audit-log', 'readOnly': False})
-
-if 'volumes' not in doc['spec']:
-    doc['spec']['volumes'] = []
-doc['spec']['volumes'].append({'name': 'audit', 'hostPath': {'path': '/etc/audit/audit-policy.yaml', 'type': 'File'}})
-doc['spec']['volumes'].append({'name': 'audit-log', 'hostPath': {'path': '/var/log', 'type': 'DirectoryOrCreate'}})
-
-with open('$MANIFEST', 'w') as f:
-    yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
-" 2>/dev/null
-fi
+# Add volume mounts using sed (not yaml.dump!)
+add_apiserver_volume "/etc/audit/audit-policy.yaml" "audit" "true" "/etc/audit/audit-policy.yaml" "File"
+add_apiserver_volume "/var/log" "audit-log" "false" "/var/log" "DirectoryOrCreate"
 
 wait_for_apiserver
 run_verify "05" "05-audit-logging"
@@ -389,28 +389,8 @@ if ! grep -q 'encryption-provider-config' "$MANIFEST"; then
   sed -i '/--authorization-mode/a\    - --encryption-provider-config=/etc/kubernetes/enc/enc.yaml' "$MANIFEST"
 fi
 
-# Add volume mount for enc dir
-if ! grep -q 'name: enc$' "$MANIFEST"; then
-  python3 -c "
-import yaml
-with open('$MANIFEST') as f:
-    doc = yaml.safe_load(f)
-
-containers = doc['spec']['containers']
-for c in containers:
-    if c['name'] == 'kube-apiserver':
-        if 'volumeMounts' not in c:
-            c['volumeMounts'] = []
-        c['volumeMounts'].append({'mountPath': '/etc/kubernetes/enc', 'name': 'enc', 'readOnly': True})
-
-if 'volumes' not in doc['spec']:
-    doc['spec']['volumes'] = []
-doc['spec']['volumes'].append({'name': 'enc', 'hostPath': {'path': '/etc/kubernetes/enc', 'type': 'DirectoryOrCreate'}})
-
-with open('$MANIFEST', 'w') as f:
-    yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
-" 2>/dev/null
-fi
+# Add volume mount using sed (not yaml.dump!)
+add_apiserver_volume "/etc/kubernetes/enc" "enc" "true" "/etc/kubernetes/enc" "DirectoryOrCreate"
 
 wait_for_apiserver
 run_verify "08" "08-encryption-at-rest"
@@ -455,8 +435,7 @@ echo -e "${CYAN}Q11: ImagePolicyWebhook${NC}"
 sed -i 's/defaultAllow: true/defaultAllow: false/' /etc/kubernetes/confcontrol/admission_configuration.yaml
 
 # Add ImagePolicyWebhook to admission plugins
-CURRENT_PLUGINS=$(grep 'enable-admission-plugins' "$MANIFEST" | head -1)
-if ! echo "$CURRENT_PLUGINS" | grep -q 'ImagePolicyWebhook'; then
+if ! grep 'enable-admission-plugins' "$MANIFEST" | grep -q 'ImagePolicyWebhook'; then
   sed -i 's/--enable-admission-plugins=\(.*\)/--enable-admission-plugins=\1,ImagePolicyWebhook/' "$MANIFEST"
 fi
 
@@ -465,28 +444,8 @@ if ! grep -q 'admission-control-config-file' "$MANIFEST"; then
   sed -i '/--enable-admission-plugins/a\    - --admission-control-config-file=/etc/kubernetes/confcontrol/admission_configuration.yaml' "$MANIFEST"
 fi
 
-# Add volume mount for confcontrol
-if ! grep -q 'name: confcontrol' "$MANIFEST"; then
-  python3 -c "
-import yaml
-with open('$MANIFEST') as f:
-    doc = yaml.safe_load(f)
-
-containers = doc['spec']['containers']
-for c in containers:
-    if c['name'] == 'kube-apiserver':
-        if 'volumeMounts' not in c:
-            c['volumeMounts'] = []
-        c['volumeMounts'].append({'mountPath': '/etc/kubernetes/confcontrol', 'name': 'confcontrol', 'readOnly': True})
-
-if 'volumes' not in doc['spec']:
-    doc['spec']['volumes'] = []
-doc['spec']['volumes'].append({'name': 'confcontrol', 'hostPath': {'path': '/etc/kubernetes/confcontrol', 'type': 'DirectoryOrCreate'}})
-
-with open('$MANIFEST', 'w') as f:
-    yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
-" 2>/dev/null
-fi
+# Add volume mount using sed (not yaml.dump!)
+add_apiserver_volume "/etc/kubernetes/confcontrol" "confcontrol" "true" "/etc/kubernetes/confcontrol" "DirectoryOrCreate"
 
 wait_for_apiserver
 run_verify "11" "11-imagepolicy-webhook"
@@ -509,6 +468,41 @@ echo ""
 # Q13 — Istio mTLS
 # =====================================================================
 echo -e "${CYAN}Q13: Istio mTLS${NC}"
+
+# Create PeerAuthentication CRD (Istio not installed, but we need the CRD for kubectl apply)
+kubectl apply -f - <<'EOF' 2>/dev/null
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: peerauthentications.security.istio.io
+spec:
+  group: security.istio.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                mtls:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+  scope: Namespaced
+  names:
+    plural: peerauthentications
+    singular: peerauthentication
+    kind: PeerAuthentication
+    shortNames:
+      - pa
+EOF
+sleep 2
+
 kubectl label namespace payments istio-injection=enabled --overwrite &>/dev/null
 
 kubectl apply -f - <<'EOF' 2>/dev/null
@@ -521,6 +515,7 @@ spec:
   mtls:
     mode: STRICT
 EOF
+sleep 1
 run_verify "13" "13-istio-mtls"
 echo ""
 
@@ -562,12 +557,26 @@ spec:
         volumeMounts:
         - mountPath: /data
           name: empty-vol
+        - mountPath: /var/cache/nginx
+          name: cache
+        - mountPath: /var/run
+          name: run
+        - mountPath: /tmp
+          name: tmp
       volumes:
       - name: empty-vol
         emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
 YAML
+kubectl delete deploy webapp -n secure-team --ignore-not-found &>/dev/null || true
+sleep 2
 kubectl apply -f /home/masters/insecure-deployment.yaml &>/dev/null
-kubectl rollout status deploy/webapp -n secure-team --timeout=60s &>/dev/null || true
+kubectl rollout status deploy/webapp -n secure-team --timeout=90s &>/dev/null || true
 run_verify "14" "14-pod-security-admission"
 echo ""
 
