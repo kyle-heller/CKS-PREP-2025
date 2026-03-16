@@ -38,15 +38,17 @@ else
 fi
 
 # Check 5: Falco config has file_output pointing to correct path
+# Note: must anchor to ^file_output: to avoid matching comments that mention file_output
+# and use -A10 because Falco's default config has ~7 comment lines between key and filename
 if [ -f "$FALCO_CONFIG" ]; then
-  if grep -A3 'file_output' "$FALCO_CONFIG" 2>/dev/null | grep -q 'enabled: true'; then
+  if grep -A10 '^file_output:' "$FALCO_CONFIG" 2>/dev/null | grep -q 'enabled: true'; then
     echo "[PASS] falco.yaml file_output is enabled"
   else
     echo "[FAIL] falco.yaml file_output not enabled"
     PASS=false
   fi
 
-  if grep -A5 'file_output' "$FALCO_CONFIG" 2>/dev/null | grep -q '/opt/falco-alerts/details'; then
+  if grep -A10 '^file_output:' "$FALCO_CONFIG" 2>/dev/null | grep -q '/opt/falco-alerts/details'; then
     echo "[PASS] file_output filename points to /opt/falco-alerts/details"
   else
     echo "[FAIL] file_output filename not set to /opt/falco-alerts/details"
