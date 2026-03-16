@@ -1,12 +1,14 @@
 #!/bin/bash
 # CKS-PREP-2025 Test Runner
-# Run LabSetUp and/or Verify scripts for Test 1 questions (Q01-Q16)
+# Run LabSetUp and/or Verify scripts for Test 1 or Test 2 questions
 # and report a summary.
 #
 # Usage:
 #   bash scripts/test-all.sh              # Run setup + verify for all Q01-Q16
+#   bash scripts/test-all.sh --test2      # Run setup + verify for all Q17-Q32
 #   bash scripts/test-all.sh --setup-only # Only run LabSetUp scripts
 #   bash scripts/test-all.sh --verify-only # Only run Verify scripts
+#   bash scripts/test-all.sh --test2 --verify-only  # Combine flags
 
 set -uo pipefail
 
@@ -16,16 +18,30 @@ QUESTIONS_DIR="$REPO_DIR/questions"
 # Parse flags
 SETUP=true
 VERIFY=true
-case "${1:-}" in
-  --setup-only)  VERIFY=false ;;
-  --verify-only) SETUP=false ;;
-esac
+TEST2=false
+for arg in "$@"; do
+  case "$arg" in
+    --setup-only)  VERIFY=false ;;
+    --verify-only) SETUP=false ;;
+    --test2)       TEST2=true ;;
+  esac
+done
 
-# Only test Test 1 questions (01-16)
+# Select question range based on test
+if $TEST2; then
+  Q_MIN=17; Q_MAX=32
+  LABEL="Q17-Q32 (Test 2)"
+  API_SERVER_QUESTIONS="26"
+else
+  Q_MIN=1; Q_MAX=16
+  LABEL="Q01-Q16 (Test 1)"
+  API_SERVER_QUESTIONS="04 07"
+fi
+
 QUESTIONS=()
 for q in $(ls -1 "$QUESTIONS_DIR" | sort); do
   NUM=$(echo "$q" | grep -oE '^[0-9]+' || true)
-  if [ -n "$NUM" ] && [ "$NUM" -ge 1 ] && [ "$NUM" -le 16 ]; then
+  if [ -n "$NUM" ] && [ "$NUM" -ge "$Q_MIN" ] && [ "$NUM" -le "$Q_MAX" ]; then
     QUESTIONS+=("$q")
   fi
 done
@@ -46,16 +62,12 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${CYAN}=== CKS-PREP-2025 Test Runner ===${NC}"
-echo "Questions: $TOTAL (Q01-Q16)"
+echo "Questions: $TOTAL ($LABEL)"
 echo ""
 
 # Results arrays for summary
 declare -a SETUP_RESULTS
 declare -a VERIFY_RESULTS
-
-# Questions whose LabSetUp modifies the API server manifest and causes a restart.
-# After these, we must wait for the API server to come back before continuing.
-API_SERVER_QUESTIONS="04 07"
 
 wait_for_apiserver() {
   printf "  Waiting for API server... "
