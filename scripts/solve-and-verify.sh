@@ -461,6 +461,14 @@ add_apiserver_volume "/etc/kubernetes/confcontrol" "confcontrol" "true" "/etc/ku
 
 wait_for_apiserver
 run_verify "11" "11-imagepolicy-webhook"
+
+# Roll back Q11 API server manifest changes — no webhook backend on KillerCoda,
+# so ImagePolicyWebhook with defaultAllow:false blocks ALL pod creation.
+# We verified the config above; now undo so Q12-Q16 can use kubectl.
+echo "  Rolling back Q11 API server changes (no webhook backend)..."
+sed -i 's/,ImagePolicyWebhook//' "$MANIFEST"
+sed -i '/--admission-control-config-file/d' "$MANIFEST"
+wait_for_apiserver
 echo ""
 
 # =====================================================================
