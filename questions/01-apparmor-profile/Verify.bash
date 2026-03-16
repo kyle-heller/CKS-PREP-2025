@@ -52,10 +52,12 @@ else
 fi
 
 # Check 5: Write to /etc/ is denied by AppArmor
-if kubectl exec nginx-pod -- touch /etc/apparmor-test 2>&1 | grep -qi "denied\|permission\|read-only\|cannot"; then
+# Use exit code (not text grep) — more reliable across environments
+if ! kubectl exec nginx-pod -- sh -c 'touch /etc/apparmor-test 2>/dev/null' 2>/dev/null; then
   echo "✓ Write to /etc/ denied by AppArmor (working correctly)"
 else
   echo "✗ Write to /etc/ was NOT denied — AppArmor may not be enforcing"
+  kubectl exec nginx-pod -- rm -f /etc/apparmor-test 2>/dev/null || true
   PASS=false
 fi
 
